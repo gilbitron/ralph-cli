@@ -17,3 +17,5 @@ dist/
 *.swo
 
 pnpm-lock.yaml
+plan.md
+progress.md
