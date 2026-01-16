@@ -8,6 +8,8 @@
 
 import { render } from 'ink';
 import { createInterface } from 'node:readline';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import chalk from 'chalk';
 import { parseCliArgs } from './cli.js';
 import { validateRequiredFiles, formatValidationErrors } from './validation.js';
@@ -49,6 +51,56 @@ async function promptYesNo(question: string): Promise<boolean> {
       resolve(normalized === 'y' || normalized === 'yes');
     });
   });
+}
+
+/**
+ * Reads and displays the plan from plan.md, then asks for confirmation.
+ *
+ * @param cwd - The working directory containing plan.md
+ * @returns Promise resolving to true if user wants to proceed, false otherwise
+ */
+async function displayPlanConfirmation(cwd: string): Promise<boolean> {
+  const planPath = join(cwd, 'plan.md');
+
+  try {
+    const planContent = await readFile(planPath, 'utf-8');
+
+    console.log('');
+    console.log(chalk.cyan.bold('Plan'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log('');
+
+    // Display the plan content with some formatting
+    const lines = planContent.split('\n');
+    for (const line of lines) {
+      // Highlight headings
+      if (line.startsWith('#')) {
+        console.log(chalk.white.bold(line));
+      }
+      // Highlight unchecked tasks
+      else if (line.includes('- [ ]')) {
+        console.log(chalk.yellow(line));
+      }
+      // Dim completed tasks
+      else if (line.includes('- [x]') || line.includes('- [X]')) {
+        console.log(chalk.gray(line));
+      }
+      // Normal content
+      else {
+        console.log(chalk.white(line));
+      }
+    }
+
+    console.log('');
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log('');
+
+    return promptYesNo('Do you want to proceed with this plan?');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red(`Error reading plan.md: ${errorMessage}`));
+    return false;
+  }
 }
 
 /**
@@ -106,6 +158,13 @@ async function main(): Promise<void> {
         process.exit(EXIT_CODE_SUCCESS);
       }
       console.log('');
+    }
+
+    // Display plan and ask for confirmation
+    const shouldProceed = await displayPlanConfirmation(config.cwd);
+    if (!shouldProceed) {
+      console.log(chalk.gray('Aborted.'));
+      process.exit(EXIT_CODE_SUCCESS);
     }
 
     // Display startup banner
