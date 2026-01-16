@@ -19,12 +19,15 @@ interface BaseEvent {
 
 /**
  * Indicates the agent is starting work on a step.
+ * Note: The step info is in part, not a separate step object.
  */
 export interface StepStartEvent extends BaseEvent {
   type: 'step_start';
-  step?: {
+  part?: {
     id?: string;
-    name?: string;
+    messageID?: string;
+    type?: string;
+    snapshot?: string;
   };
 }
 
@@ -73,14 +76,19 @@ export interface ToolExecuteAfterEvent extends BaseEvent {
 
 /**
  * Contains details about tool usage.
+ * Note: The tool name is in part.tool, not a separate tool object.
  */
 export interface ToolUseEvent extends BaseEvent {
   type: 'tool_use';
-  tool?: {
-    name?: string;
-    id?: string;
+  part?: {
+    tool?: string;
+    callID?: string;
+    state?: {
+      status?: string;
+      input?: unknown;
+      output?: unknown;
+    };
   };
-  input?: unknown;
 }
 
 /**

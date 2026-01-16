@@ -68,19 +68,16 @@ export function handleStepStart(
     return { handled: false, eventType: event.type };
   }
 
-  const stepName = event.step?.name ?? 'unknown';
-  const stepId = event.step?.id;
-
-  // Output info about the new step
+  // The step_start event doesn't contain a step name, just IDs
+  // Simply indicate a new step is starting
   callbacks.onOutput({
-    content: `Starting step${stepId ? ` (${stepId})` : ''}: ${stepName}`,
+    content: 'Starting new step',
     type: 'info',
   });
 
   return {
     handled: true,
     eventType: 'step_start',
-    content: stepName,
   };
 }
 
@@ -207,7 +204,8 @@ export function handleToolUse(
     return { handled: false, eventType: event.type };
   }
 
-  const toolName = event.tool?.name ?? 'unknown tool';
+  // Tool name is in part.tool, not event.tool.name
+  const toolName = event.part?.tool ?? 'unknown tool';
 
   // Output tool usage info
   callbacks.onOutput({
