@@ -49,8 +49,9 @@ export async function checkGitStatus(cwd: string): Promise<GitStatusResult> {
     // Parse the output - each line represents a changed file
     const lines = stdout.trim().split('\n').filter((line) => line.length > 0);
 
-    // Extract just the filenames (format is "XY filename" where XY is 2 chars)
-    const changedFiles = lines.map((line) => line.slice(3));
+    // Extract just the filenames (format is "XY filename" where XY is 2 chars + space)
+    // Use regex to handle any whitespace variation between status and filename
+    const changedFiles = lines.map((line) => line.replace(/^..\s/, ''));
 
     return {
       isGitRepo: true,
