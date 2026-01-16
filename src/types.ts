@@ -15,79 +15,9 @@
  */
 interface BaseEvent {
   type: string;
-}
-
-/**
- * Indicates the agent is starting work on a step.
- * Note: The step info is in part, not a separate step object.
- */
-export interface StepStartEvent extends BaseEvent {
-  type: 'step_start';
-  part?: {
-    id?: string;
-    messageID?: string;
-    type?: string;
-    snapshot?: string;
-  };
-}
-
-/**
- * Contains updated message content from the agent.
- * Used to display streaming text output.
- */
-export interface MessagePartUpdatedEvent extends BaseEvent {
-  type: 'message.part.updated';
-  part?: {
-    type?: string;
-    content?: string;
-    delta?: string;
-  };
-}
-
-/**
- * Emitted before a tool is executed.
- * Used to show a spinner/indicator while tool runs.
- */
-export interface ToolExecuteBeforeEvent extends BaseEvent {
-  type: 'tool.execute.before';
-  tool?: {
-    name?: string;
-    id?: string;
-  };
-  input?: unknown;
-}
-
-/**
- * Emitted after a tool has finished executing.
- * Contains the result status (success/failure).
- */
-export interface ToolExecuteAfterEvent extends BaseEvent {
-  type: 'tool.execute.after';
-  tool?: {
-    name?: string;
-    id?: string;
-  };
-  result?: {
-    success?: boolean;
-    error?: string;
-    output?: unknown;
-  };
-}
-
-/**
- * Contains details about tool usage.
- * Note: The tool name is in part.tool, not a separate tool object.
- */
-export interface ToolUseEvent extends BaseEvent {
-  type: 'tool_use';
-  part?: {
-    tool?: string;
-    callID?: string;
-    state?: {
-      status?: string;
-      input?: unknown;
-      output?: unknown;
-    };
+  properties?: {
+    sessionID?: string;
+    [key: string]: unknown;
   };
 }
 
@@ -100,26 +30,115 @@ export interface TokenUsage {
 }
 
 /**
- * Emitted when a step finishes.
- * Contains token usage information in part.tokens.
+ * Tool part state for message.part.updated events.
  */
-export interface StepFinishEvent extends BaseEvent {
-  type: 'step_finish';
-  part?: {
-    tokens?: TokenUsage;
-    content?: string;
+export interface ToolPartState {
+  status?: 'pending' | 'running' | 'completed' | 'error';
+  title?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+}
+
+/**
+ * Text part with timing info.
+ */
+export interface TextPart {
+  type: 'text';
+  sessionID?: string;
+  text?: string;
+  time?: {
+    start?: number;
+    end?: number;
   };
 }
 
 /**
- * Contains session status updates.
+ * Tool part for tool usage.
  */
-export interface SessionStatusEvent extends BaseEvent {
-  type: 'session.status';
-  status?: string;
-  session?: {
+export interface ToolPart {
+  type: 'tool';
+  sessionID?: string;
+  tool?: string;
+  state?: ToolPartState;
+}
+
+/**
+ * Step start part.
+ */
+export interface StepStartPart {
+  type: 'step-start';
+  sessionID?: string;
+}
+
+/**
+ * Step finish part with tokens.
+ */
+export interface StepFinishPart {
+  type: 'step-finish';
+  sessionID?: string;
+  tokens?: TokenUsage;
+}
+
+/**
+ * Union type for message parts.
+ */
+export type MessagePart = TextPart | ToolPart | StepStartPart | StepFinishPart;
+
+/**
+ * Contains updated message content from the agent.
+ * The part.type determines what kind of update this is:
+ * - 'text': Text output from the agent
+ * - 'tool': Tool usage information
+ * - 'step-start': Step started (ignored)
+ * - 'step-finish': Step finished with token info
+ */
+export interface MessagePartUpdatedEvent extends BaseEvent {
+  type: 'message.part.updated';
+  properties?: {
+    sessionID?: string;
+    part?: MessagePart;
+  };
+}
+
+/**
+ * Session error event.
+ */
+export interface SessionErrorEvent extends BaseEvent {
+  type: 'session.error';
+  properties?: {
+    sessionID?: string;
+    error?: {
+      name?: string;
+      message?: string;
+      data?: {
+        message?: string;
+      };
+    };
+  };
+}
+
+/**
+ * Session idle event - signals the session is complete.
+ */
+export interface SessionIdleEvent extends BaseEvent {
+  type: 'session.idle';
+  properties?: {
+    sessionID?: string;
+  };
+}
+
+/**
+ * Permission asked event.
+ */
+export interface PermissionAskedEvent extends BaseEvent {
+  type: 'permission.asked';
+  properties?: {
+    sessionID?: string;
     id?: string;
-    state?: string;
+    permission?: string;
+    patterns?: string[];
+    always?: string[];
   };
 }
 
@@ -128,43 +147,28 @@ export interface SessionStatusEvent extends BaseEvent {
  * Use type guards to narrow to specific event types.
  */
 export type StreamEvent =
-  | StepStartEvent
   | MessagePartUpdatedEvent
-  | ToolExecuteBeforeEvent
-  | ToolExecuteAfterEvent
-  | ToolUseEvent
-  | StepFinishEvent
-  | SessionStatusEvent;
+  | SessionErrorEvent
+  | SessionIdleEvent
+  | PermissionAskedEvent;
 
 /**
  * Type guard functions for stream events.
  */
-export function isStepStartEvent(event: StreamEvent): event is StepStartEvent {
-  return event.type === 'step_start';
-}
-
 export function isMessagePartUpdatedEvent(event: StreamEvent): event is MessagePartUpdatedEvent {
   return event.type === 'message.part.updated';
 }
 
-export function isToolExecuteBeforeEvent(event: StreamEvent): event is ToolExecuteBeforeEvent {
-  return event.type === 'tool.execute.before';
+export function isSessionErrorEvent(event: StreamEvent): event is SessionErrorEvent {
+  return event.type === 'session.error';
 }
 
-export function isToolExecuteAfterEvent(event: StreamEvent): event is ToolExecuteAfterEvent {
-  return event.type === 'tool.execute.after';
+export function isSessionIdleEvent(event: StreamEvent): event is SessionIdleEvent {
+  return event.type === 'session.idle';
 }
 
-export function isToolUseEvent(event: StreamEvent): event is ToolUseEvent {
-  return event.type === 'tool_use';
-}
-
-export function isStepFinishEvent(event: StreamEvent): event is StepFinishEvent {
-  return event.type === 'step_finish';
-}
-
-export function isSessionStatusEvent(event: StreamEvent): event is SessionStatusEvent {
-  return event.type === 'session.status';
+export function isPermissionAskedEvent(event: StreamEvent): event is PermissionAskedEvent {
+  return event.type === 'permission.asked';
 }
 
 // =============================================================================

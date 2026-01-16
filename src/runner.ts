@@ -350,18 +350,19 @@ async function runIteration(
 
         // Process message content for task and completion detection
         if (isMessagePartUpdatedEvent(event)) {
-          const content = event.part?.delta ?? event.part?.content ?? '';
-          if (content) {
-            meaningfulEventsReceived++;
-            taskDetector.processContent(content);
-            completionDetector.processContent(content);
+          const part = event.properties?.part;
+          if (part) {
+            // For text parts, extract content for detection
+            if (part.type === 'text' && 'text' in part && part.text) {
+              meaningfulEventsReceived++;
+              taskDetector.processContent(part.text);
+              completionDetector.processContent(part.text);
+            }
+            // Tool parts are meaningful events
+            if (part.type === 'tool') {
+              meaningfulEventsReceived++;
+            }
           }
-        }
-
-        // Count other meaningful events
-        if (event.type === 'step_start' || event.type === 'step_finish' ||
-          event.type === 'tool.execute.before' || event.type === 'tool.execute.after') {
-          meaningfulEventsReceived++;
         }
       },
       onWarning: (warning: string, _rawLine: string) => {

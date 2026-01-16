@@ -3,6 +3,12 @@
  *
  * Handles specific stream event types from the opencode CLI output,
  * extracting relevant information and updating the application state.
+ *
+ * Based on the opencode event processor pattern:
+ * - message.part.updated: Contains text, tool, step-start, step-finish parts
+ * - session.error: Session error occurred
+ * - session.idle: Session is complete
+ * - permission.asked: Permission request (auto-handled)
  */
 
 import type {
@@ -10,16 +16,33 @@ import type {
   RunnerCallbacks,
   TokenUsage,
   OutputLine,
+  MessagePart,
+  ToolPart,
+  TextPart,
+  StepFinishPart,
 } from './types.js';
 import {
-  isStepStartEvent,
   isMessagePartUpdatedEvent,
-  isToolExecuteBeforeEvent,
-  isToolExecuteAfterEvent,
-  isToolUseEvent,
-  isStepFinishEvent,
-  isSessionStatusEvent,
+  isSessionErrorEvent,
+  isSessionIdleEvent,
 } from './types.js';
+
+/**
+ * Tool display configuration.
+ * Maps tool names to display names and output types.
+ */
+const TOOL_CONFIG: Record<string, { displayName: string; type: OutputLine['type'] }> = {
+  todowrite: { displayName: 'Todo', type: 'warning' },
+  todoread: { displayName: 'Todo', type: 'warning' },
+  bash: { displayName: 'Bash', type: 'error' },
+  edit: { displayName: 'Edit', type: 'success' },
+  glob: { displayName: 'Glob', type: 'info' },
+  grep: { displayName: 'Grep', type: 'info' },
+  list: { displayName: 'List', type: 'info' },
+  read: { displayName: 'Read', type: 'info' },
+  write: { displayName: 'Write', type: 'success' },
+  websearch: { displayName: 'Search', type: 'info' },
+};
 
 /**
  * Result from handling an event.
@@ -40,6 +63,8 @@ export interface EventHandlerResult {
   toolSuccess?: boolean;
   /** Session status if applicable */
   sessionStatus?: string;
+  /** Whether the session is complete */
+  sessionComplete?: boolean;
 }
 
 /**
@@ -48,63 +73,103 @@ export interface EventHandlerResult {
 export interface EventHandlerOptions {
   /** Callbacks to update the TUI state */
   callbacks: RunnerCallbacks;
+  /** Session ID to filter events for (optional) */
+  sessionID?: string;
   /** Enable debug output */
   debug?: boolean;
 }
 
 /**
- * Handles a step_start event.
- * Indicates the agent is starting work on a new step.
- *
- * @param event - The step_start event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with step information
+ * Format tool input for display.
+ * Creates a concise representation of the tool's arguments.
  */
-export function handleStepStart(
-  event: StreamEvent,
-  callbacks: RunnerCallbacks
-): EventHandlerResult {
-  if (!isStepStartEvent(event)) {
-    return { handled: false, eventType: event.type };
+function formatToolInput(input?: Record<string, unknown>): string {
+  if (!input || Object.keys(input).length === 0) {
+    return '';
   }
 
-  // The step_start event doesn't contain a step name, just IDs
-  // Simply indicate a new step is starting
-  callbacks.onOutput({
-    content: 'Starting new step',
-    type: 'info',
-  });
+  // For simple inputs, show key=value pairs
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string') {
+      // Truncate long strings
+      const truncated = value.length > 50 ? value.slice(0, 47) + '...' : value;
+      parts.push(`${key}="${truncated}"`);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      parts.push(`${key}=${value}`);
+    } else if (value !== null && value !== undefined) {
+      parts.push(`${key}=<${typeof value}>`);
+    }
+  }
 
-  return {
-    handled: true,
-    eventType: 'step_start',
-  };
+  return parts.join(', ');
 }
 
 /**
- * Handles a message.part.updated event.
- * Contains streaming text output from the agent.
- *
- * @param event - The message.part.updated event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with message content
+ * Get tool display configuration.
  */
-export function handleMessagePartUpdated(
-  event: StreamEvent,
+function getToolConfig(toolName: string): { displayName: string; type: OutputLine['type'] } {
+  const lowerName = toolName.toLowerCase();
+  return TOOL_CONFIG[lowerName] ?? { displayName: toolName, type: 'tool' };
+}
+
+/**
+ * Type guard to check if a part is a tool part.
+ */
+function isToolPart(part: MessagePart): part is ToolPart {
+  return part.type === 'tool';
+}
+
+/**
+ * Type guard to check if a part is a text part.
+ */
+function isTextPart(part: MessagePart): part is TextPart {
+  return part.type === 'text';
+}
+
+/**
+ * Type guard to check if a part is a step-finish part.
+ */
+function isStepFinishPart(part: MessagePart): part is StepFinishPart {
+  return part.type === 'step-finish';
+}
+
+/**
+ * Handles a tool part from message.part.updated.
+ * Shows tool execution with arguments when completed.
+ */
+function handleToolPart(
+  part: ToolPart,
   callbacks: RunnerCallbacks
 ): EventHandlerResult {
-  if (!isMessagePartUpdatedEvent(event)) {
-    return { handled: false, eventType: event.type };
+  // Only show completed tools
+  if (part.state?.status !== 'completed') {
+    return { handled: true, eventType: 'message.part.updated' };
   }
 
-  // Extract the content - could be full content or delta (incremental)
-  const content = event.part?.delta ?? event.part?.content ?? '';
+  const toolName = part.tool ?? 'unknown';
+  const config = getToolConfig(toolName);
 
-  if (content.length > 0) {
-    // For message content, we output as default type
-    // The caller can accumulate these for display
+  // Build the tool output message
+  let title = part.state?.title;
+  if (!title && part.state?.input) {
+    title = formatToolInput(part.state.input);
+  }
+  if (!title) {
+    title = '';
+  }
+
+  const message = title ? `${config.displayName}: ${title}` : config.displayName;
+
+  callbacks.onOutput({
+    content: message,
+    type: config.type,
+  });
+
+  // For bash tool, also show the output if available
+  if (toolName.toLowerCase() === 'bash' && part.state?.output?.trim()) {
     callbacks.onOutput({
-      content,
+      content: part.state.output.trim(),
       type: 'default',
     });
   }
@@ -112,197 +177,174 @@ export function handleMessagePartUpdated(
   return {
     handled: true,
     eventType: 'message.part.updated',
-    content,
-  };
-}
-
-/**
- * Handles a tool.execute.before event.
- * Indicates a tool is about to execute.
- *
- * @param event - The tool.execute.before event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with tool information
- */
-export function handleToolExecuteBefore(
-  event: StreamEvent,
-  callbacks: RunnerCallbacks
-): EventHandlerResult {
-  if (!isToolExecuteBeforeEvent(event)) {
-    return { handled: false, eventType: event.type };
-  }
-
-  const toolName = event.tool?.name ?? 'unknown tool';
-
-  // Output tool execution start with tool type styling
-  callbacks.onOutput({
-    content: `Executing: ${toolName}`,
-    type: 'tool',
-  });
-
-  return {
-    handled: true,
-    eventType: 'tool.execute.before',
     toolName,
+    toolSuccess: part.state?.status === 'completed',
   };
 }
 
 /**
- * Handles a tool.execute.after event.
- * Contains the result of a tool execution.
- *
- * @param event - The tool.execute.after event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with tool result information
+ * Handles a text part from message.part.updated.
+ * Shows text output when completed (has end time).
  */
-export function handleToolExecuteAfter(
-  event: StreamEvent,
+function handleTextPart(
+  part: TextPart,
   callbacks: RunnerCallbacks
 ): EventHandlerResult {
-  if (!isToolExecuteAfterEvent(event)) {
-    return { handled: false, eventType: event.type };
+  // Only show completed text (has end time)
+  if (!part.time?.end) {
+    return { handled: true, eventType: 'message.part.updated' };
   }
 
-  const toolName = event.tool?.name ?? 'unknown tool';
-  const success = event.result?.success ?? true;
-  const error = event.result?.error;
-
-  if (success) {
+  const text = part.text ?? '';
+  if (text.length > 0) {
     callbacks.onOutput({
-      content: `Completed: ${toolName}`,
-      type: 'success',
-    });
-  } else {
-    callbacks.onOutput({
-      content: `Failed: ${toolName}${error ? ` - ${error}` : ''}`,
-      type: 'error',
+      content: text,
+      type: 'default',
     });
   }
 
   return {
     handled: true,
-    eventType: 'tool.execute.after',
-    toolName,
-    toolSuccess: success,
-    content: error,
+    eventType: 'message.part.updated',
+    content: text,
   };
 }
 
 /**
- * Handles a tool_use event.
- * Contains details about tool usage.
- *
- * @param event - The tool_use event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with tool information
+ * Handles a step-finish part from message.part.updated.
+ * Updates token counts but doesn't show output (per user request).
  */
-export function handleToolUse(
-  event: StreamEvent,
+function handleStepFinishPart(
+  part: StepFinishPart,
   callbacks: RunnerCallbacks
 ): EventHandlerResult {
-  if (!isToolUseEvent(event)) {
-    return { handled: false, eventType: event.type };
-  }
-
-  // Tool name is in part.tool, not event.tool.name
-  const toolName = event.part?.tool ?? 'unknown tool';
-
-  // Output tool usage info
-  callbacks.onOutput({
-    content: `Using tool: ${toolName}`,
-    type: 'tool',
-  });
-
-  return {
-    handled: true,
-    eventType: 'tool_use',
-    toolName,
-  };
-}
-
-/**
- * Handles a step_finish event.
- * Contains token usage information for the completed step.
- *
- * @param event - The step_finish event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with token usage
- */
-export function handleStepFinish(
-  event: StreamEvent,
-  callbacks: RunnerCallbacks
-): EventHandlerResult {
-  if (!isStepFinishEvent(event)) {
-    return { handled: false, eventType: event.type };
-  }
-
-  const tokens = event.part?.tokens;
+  const tokens = part.tokens;
 
   if (tokens && (tokens.input || tokens.output)) {
-    // Update token counts
     callbacks.onTokensUpdate({
       input: tokens.input ?? 0,
       output: tokens.output ?? 0,
     });
-
-    // Output token info
-    const inputTokens = tokens.input ?? 0;
-    const outputTokens = tokens.output ?? 0;
-    callbacks.onOutput({
-      content: `Step complete (tokens: ${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out)`,
-      type: 'info',
-    });
-  } else {
-    callbacks.onOutput({
-      content: 'Step complete',
-      type: 'info',
-    });
   }
+
+  // Don't output anything for step_finish per user request
 
   return {
     handled: true,
-    eventType: 'step_finish',
+    eventType: 'message.part.updated',
     tokens,
   };
 }
 
 /**
- * Handles a session.status event.
- * Contains session state updates.
- *
- * @param event - The session.status event
- * @param callbacks - Runner callbacks for state updates
- * @returns Handler result with session status
+ * Handles a message.part.updated event.
+ * Dispatches to specific handlers based on part type.
  */
-export function handleSessionStatus(
+export function handleMessagePartUpdated(
   event: StreamEvent,
-  callbacks: RunnerCallbacks
+  callbacks: RunnerCallbacks,
+  sessionID?: string
 ): EventHandlerResult {
-  if (!isSessionStatusEvent(event)) {
+  if (!isMessagePartUpdatedEvent(event)) {
     return { handled: false, eventType: event.type };
   }
 
-  const status = event.status ?? event.session?.state ?? 'unknown';
+  const part = event.properties?.part;
+  if (!part) {
+    return { handled: true, eventType: 'message.part.updated' };
+  }
 
-  // Map session status to appropriate output type
-  let outputType: OutputLine['type'] = 'info';
-  if (status === 'error' || status === 'failed') {
-    outputType = 'error';
-  } else if (status === 'complete' || status === 'completed' || status === 'success') {
-    outputType = 'success';
-  } else if (status === 'running' || status === 'working') {
-    outputType = 'info';
+  // Filter by session ID if provided
+  if (sessionID && part.sessionID && part.sessionID !== sessionID) {
+    return { handled: true, eventType: 'message.part.updated' };
+  }
+
+  // Dispatch based on part type
+  if (isToolPart(part)) {
+    return handleToolPart(part, callbacks);
+  }
+
+  if (isTextPart(part)) {
+    return handleTextPart(part, callbacks);
+  }
+
+  if (isStepFinishPart(part)) {
+    return handleStepFinishPart(part, callbacks);
+  }
+
+  // step-start is ignored per user request
+  if (part.type === 'step-start') {
+    return { handled: true, eventType: 'message.part.updated' };
+  }
+
+  return { handled: true, eventType: 'message.part.updated' };
+}
+
+/**
+ * Handles a session.error event.
+ * Shows error message to the user.
+ */
+export function handleSessionError(
+  event: StreamEvent,
+  callbacks: RunnerCallbacks,
+  sessionID?: string
+): EventHandlerResult {
+  if (!isSessionErrorEvent(event)) {
+    return { handled: false, eventType: event.type };
+  }
+
+  // Filter by session ID if provided
+  if (sessionID && event.properties?.sessionID && event.properties.sessionID !== sessionID) {
+    return { handled: true, eventType: 'session.error' };
+  }
+
+  const error = event.properties?.error;
+  let errorMessage = error?.name ?? 'Unknown error';
+
+  // Check for more detailed error message
+  if (error?.data?.message) {
+    errorMessage = error.data.message;
+  } else if (error?.message) {
+    errorMessage = error.message;
   }
 
   callbacks.onOutput({
-    content: `Session status: ${status}`,
-    type: outputType,
+    content: `Error: ${errorMessage}`,
+    type: 'error',
   });
+
+  callbacks.onStatusChange('error', errorMessage);
 
   return {
     handled: true,
-    eventType: 'session.status',
-    sessionStatus: status,
+    eventType: 'session.error',
+    content: errorMessage,
+  };
+}
+
+/**
+ * Handles a session.idle event.
+ * Signals that the session is complete.
+ */
+export function handleSessionIdle(
+  event: StreamEvent,
+  _callbacks: RunnerCallbacks,
+  sessionID?: string
+): EventHandlerResult {
+  if (!isSessionIdleEvent(event)) {
+    return { handled: false, eventType: event.type };
+  }
+
+  // Filter by session ID if provided
+  if (sessionID && event.properties?.sessionID && event.properties.sessionID !== sessionID) {
+    return { handled: true, eventType: 'session.idle' };
+  }
+
+  // Session is complete - the runner should handle this
+  return {
+    handled: true,
+    eventType: 'session.idle',
+    sessionComplete: true,
   };
 }
 
@@ -318,7 +360,7 @@ export function handleStreamEvent(
   event: StreamEvent,
   options: EventHandlerOptions
 ): EventHandlerResult {
-  const { callbacks, debug } = options;
+  const { callbacks, sessionID, debug } = options;
 
   // Debug logging if enabled
   if (debug) {
@@ -327,30 +369,24 @@ export function handleStreamEvent(
 
   // Dispatch to specific handler based on event type
   switch (event.type) {
-    case 'step_start':
-      return handleStepStart(event, callbacks);
-
     case 'message.part.updated':
-      return handleMessagePartUpdated(event, callbacks);
+      return handleMessagePartUpdated(event, callbacks, sessionID);
 
-    case 'tool.execute.before':
-      return handleToolExecuteBefore(event, callbacks);
+    case 'session.error':
+      return handleSessionError(event, callbacks, sessionID);
 
-    case 'tool.execute.after':
-      return handleToolExecuteAfter(event, callbacks);
+    case 'session.idle':
+      return handleSessionIdle(event, callbacks, sessionID);
 
-    case 'tool_use':
-      return handleToolUse(event, callbacks);
-
-    case 'step_finish':
-      return handleStepFinish(event, callbacks);
-
-    case 'session.status':
-      return handleSessionStatus(event, callbacks);
+    case 'permission.asked':
+      // Permission handling would go here - for now just acknowledge
+      if (debug) {
+        console.log('[EventHandler] Permission asked - auto-handling not implemented');
+      }
+      return { handled: true, eventType: 'permission.asked' };
 
     default: {
       // Handle unknown event types that might be added in the future
-      // Cast to unknown first, then to the expected shape to extract type safely
       const unknownEvent = event as unknown as { type: string };
       if (debug) {
         console.log(`[EventHandler] Unhandled event type: ${unknownEvent.type}`);
