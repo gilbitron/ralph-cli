@@ -13,7 +13,7 @@ import { handleStreamEvent } from './event-handlers.js';
 import { TaskDetector } from './task-detection.js';
 import { CompletionDetector } from './completion-detection.js';
 import { DebugLogger, createAndInitializeLogger } from './logger.js';
-import { isMessagePartUpdatedEvent } from './types.js';
+import { isTextEvent, isToolUseEvent } from './types.js';
 import { DEFAULT_PROMPT } from './prompt.js';
 
 // =============================================================================
@@ -348,21 +348,19 @@ async function runIteration(
           debug: config.debug,
         });
 
-        // Process message content for task and completion detection
-        if (isMessagePartUpdatedEvent(event)) {
-          const part = event.properties?.part;
-          if (part) {
-            // For text parts, extract content for detection
-            if (part.type === 'text' && 'text' in part && part.text) {
-              meaningfulEventsReceived++;
-              taskDetector.processContent(part.text);
-              completionDetector.processContent(part.text);
-            }
-            // Tool parts are meaningful events
-            if (part.type === 'tool') {
-              meaningfulEventsReceived++;
-            }
+        // Process text content for task and completion detection
+        if (isTextEvent(event)) {
+          const text = event.part?.text;
+          if (text) {
+            meaningfulEventsReceived++;
+            taskDetector.processContent(text);
+            completionDetector.processContent(text);
           }
+        }
+
+        // Tool use events are meaningful events
+        if (isToolUseEvent(event)) {
+          meaningfulEventsReceived++;
         }
       },
       onWarning: (warning: string, _rawLine: string) => {

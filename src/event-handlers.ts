@@ -1,14 +1,16 @@
 /**
  * Ralph CLI - Event Handlers
  *
- * Handles specific stream event types from the opencode CLI output,
+ * Handles specific stream event types from the opencode CLI JSON output,
  * extracting relevant information and updating the application state.
  *
- * Based on the opencode event processor pattern:
- * - message.part.updated: Contains text, tool, step-start, step-finish parts
+ * Event types from opencode --format=json:
+ * - step_start: New step starting (ignored per user request)
+ * - text: Text output from the agent
+ * - tool_use: Tool execution with input/output
+ * - step_finish: Step completed with token info (ignored per user request, but tokens tracked)
  * - session.error: Session error occurred
  * - session.idle: Session is complete
- * - permission.asked: Permission request (auto-handled)
  */
 
 import type {
@@ -16,13 +18,12 @@ import type {
   RunnerCallbacks,
   TokenUsage,
   OutputLine,
-  MessagePart,
-  ToolPart,
-  TextPart,
-  StepFinishPart,
 } from './types.js';
 import {
-  isMessagePartUpdatedEvent,
+  isStepStartEvent,
+  isTextEvent,
+  isToolUseEvent,
+  isStepFinishEvent,
   isSessionErrorEvent,
   isSessionIdleEvent,
 } from './types.js';
@@ -114,43 +115,100 @@ function getToolConfig(toolName: string): { displayName: string; type: OutputLin
 }
 
 /**
- * Type guard to check if a part is a tool part.
+ * Handles a step_start event.
+ * Ignored per user request - we don't show step start output.
  */
-function isToolPart(part: MessagePart): part is ToolPart {
-  return part.type === 'tool';
+export function handleStepStart(
+  event: StreamEvent,
+  _callbacks: RunnerCallbacks,
+  _sessionID?: string
+): EventHandlerResult {
+  if (!isStepStartEvent(event)) {
+    return { handled: false, eventType: event.type };
+  }
+
+  // Ignored per user request
+  return {
+    handled: true,
+    eventType: 'step_start',
+  };
 }
 
 /**
- * Type guard to check if a part is a text part.
+ * Handles a text event.
+ * Shows text output when it has an end time (completed).
  */
-function isTextPart(part: MessagePart): part is TextPart {
-  return part.type === 'text';
+export function handleText(
+  event: StreamEvent,
+  callbacks: RunnerCallbacks,
+  sessionID?: string
+): EventHandlerResult {
+  if (!isTextEvent(event)) {
+    return { handled: false, eventType: event.type };
+  }
+
+  // Filter by session ID if provided
+  if (sessionID && event.sessionID && event.sessionID !== sessionID) {
+    return { handled: true, eventType: 'text' };
+  }
+
+  const part = event.part;
+  if (!part) {
+    return { handled: true, eventType: 'text' };
+  }
+
+  // Only show completed text (has end time)
+  if (!part.time?.end) {
+    return { handled: true, eventType: 'text' };
+  }
+
+  const text = part.text ?? '';
+  if (text.length > 0) {
+    callbacks.onOutput({
+      content: text,
+      type: 'default',
+    });
+  }
+
+  return {
+    handled: true,
+    eventType: 'text',
+    content: text,
+  };
 }
 
 /**
- * Type guard to check if a part is a step-finish part.
- */
-function isStepFinishPart(part: MessagePart): part is StepFinishPart {
-  return part.type === 'step-finish';
-}
-
-/**
- * Handles a tool part from message.part.updated.
+ * Handles a tool_use event.
  * Shows tool execution with arguments when completed.
  */
-function handleToolPart(
-  part: ToolPart,
-  callbacks: RunnerCallbacks
+export function handleToolUse(
+  event: StreamEvent,
+  callbacks: RunnerCallbacks,
+  sessionID?: string
 ): EventHandlerResult {
+  if (!isToolUseEvent(event)) {
+    return { handled: false, eventType: event.type };
+  }
+
+  // Filter by session ID if provided
+  if (sessionID && event.sessionID && event.sessionID !== sessionID) {
+    return { handled: true, eventType: 'tool_use' };
+  }
+
+  const part = event.part;
+  if (!part) {
+    return { handled: true, eventType: 'tool_use' };
+  }
+
   // Only show completed tools
   if (part.state?.status !== 'completed') {
-    return { handled: true, eventType: 'message.part.updated' };
+    return { handled: true, eventType: 'tool_use' };
   }
 
   const toolName = part.tool ?? 'unknown';
   const config = getToolConfig(toolName);
 
-  // Build the tool output message
+  // Build the tool output message - prefer title, then format input
   let title = part.state?.title;
   if (!title && part.state?.input) {
     title = formatToolInput(part.state.input);
@@ -176,49 +234,31 @@ function handleToolPart(
 
   return {
     handled: true,
-    eventType: 'message.part.updated',
+    eventType: 'tool_use',
     toolName,
     toolSuccess: part.state?.status === 'completed',
   };
 }
 
 /**
- * Handles a text part from message.part.updated.
- * Shows text output when completed (has end time).
- */
-function handleTextPart(
-  part: TextPart,
-  callbacks: RunnerCallbacks
-): EventHandlerResult {
-  // Only show completed text (has end time)
-  if (!part.time?.end) {
-    return { handled: true, eventType: 'message.part.updated' };
-  }
-
-  const text = part.text ?? '';
-  if (text.length > 0) {
-    callbacks.onOutput({
-      content: text,
-      type: 'default',
-    });
-  }
-
-  return {
-    handled: true,
-    eventType: 'message.part.updated',
-    content: text,
-  };
-}
-
-/**
- * Handles a step-finish part from message.part.updated.
+ * Handles a step_finish event.
  * Updates token counts but doesn't show output (per user request).
  */
-function handleStepFinishPart(
-  part: StepFinishPart,
-  callbacks: RunnerCallbacks
+export function handleStepFinish(
+  event: StreamEvent,
+  callbacks: RunnerCallbacks,
+  sessionID?: string
 ): EventHandlerResult {
-  const tokens = part.tokens;
+  if (!isStepFinishEvent(event)) {
+    return { handled: false, eventType: event.type };
+  }
+
+  // Filter by session ID if provided
+  if (sessionID && event.sessionID && event.sessionID !== sessionID) {
+    return { handled: true, eventType: 'step_finish' };
+  }
+
+  const tokens = event.part?.tokens;
 
   if (tokens && (tokens.input || tokens.output)) {
     callbacks.onTokensUpdate({
@@ -231,53 +271,9 @@ function handleStepFinishPart(
 
   return {
     handled: true,
-    eventType: 'message.part.updated',
+    eventType: 'step_finish',
     tokens,
   };
-}
-
-/**
- * Handles a message.part.updated event.
- * Dispatches to specific handlers based on part type.
- */
-export function handleMessagePartUpdated(
-  event: StreamEvent,
-  callbacks: RunnerCallbacks,
-  sessionID?: string
-): EventHandlerResult {
-  if (!isMessagePartUpdatedEvent(event)) {
-    return { handled: false, eventType: event.type };
-  }
-
-  const part = event.properties?.part;
-  if (!part) {
-    return { handled: true, eventType: 'message.part.updated' };
-  }
-
-  // Filter by session ID if provided
-  if (sessionID && part.sessionID && part.sessionID !== sessionID) {
-    return { handled: true, eventType: 'message.part.updated' };
-  }
-
-  // Dispatch based on part type
-  if (isToolPart(part)) {
-    return handleToolPart(part, callbacks);
-  }
-
-  if (isTextPart(part)) {
-    return handleTextPart(part, callbacks);
-  }
-
-  if (isStepFinishPart(part)) {
-    return handleStepFinishPart(part, callbacks);
-  }
-
-  // step-start is ignored per user request
-  if (part.type === 'step-start') {
-    return { handled: true, eventType: 'message.part.updated' };
-  }
-
-  return { handled: true, eventType: 'message.part.updated' };
 }
 
 /**
@@ -294,11 +290,11 @@ export function handleSessionError(
   }
 
   // Filter by session ID if provided
-  if (sessionID && event.properties?.sessionID && event.properties.sessionID !== sessionID) {
+  if (sessionID && event.sessionID && event.sessionID !== sessionID) {
     return { handled: true, eventType: 'session.error' };
   }
 
-  const error = event.properties?.error;
+  const error = event.error;
   let errorMessage = error?.name ?? 'Unknown error';
 
   // Check for more detailed error message
@@ -336,7 +332,7 @@ export function handleSessionIdle(
   }
 
   // Filter by session ID if provided
-  if (sessionID && event.properties?.sessionID && event.properties.sessionID !== sessionID) {
+  if (sessionID && event.sessionID && event.sessionID !== sessionID) {
     return { handled: true, eventType: 'session.idle' };
   }
 
@@ -369,21 +365,23 @@ export function handleStreamEvent(
 
   // Dispatch to specific handler based on event type
   switch (event.type) {
-    case 'message.part.updated':
-      return handleMessagePartUpdated(event, callbacks, sessionID);
+    case 'step_start':
+      return handleStepStart(event, callbacks, sessionID);
+
+    case 'text':
+      return handleText(event, callbacks, sessionID);
+
+    case 'tool_use':
+      return handleToolUse(event, callbacks, sessionID);
+
+    case 'step_finish':
+      return handleStepFinish(event, callbacks, sessionID);
 
     case 'session.error':
       return handleSessionError(event, callbacks, sessionID);
 
     case 'session.idle':
       return handleSessionIdle(event, callbacks, sessionID);
-
-    case 'permission.asked':
-      // Permission handling would go here - for now just acknowledge
-      if (debug) {
-        console.log('[EventHandler] Permission asked - auto-handling not implemented');
-      }
-      return { handled: true, eventType: 'permission.asked' };
 
     default: {
       // Handle unknown event types that might be added in the future

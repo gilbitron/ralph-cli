@@ -3,6 +3,8 @@
  *
  * This file contains all TypeScript interfaces and types for the Ralph CLI,
  * including stream event types, application state, and configuration.
+ *
+ * Event types match the opencode CLI JSON output format (--format=json).
  */
 
 // =============================================================================
@@ -15,10 +17,8 @@
  */
 interface BaseEvent {
   type: string;
-  properties?: {
-    sessionID?: string;
-    [key: string]: unknown;
-  };
+  timestamp?: number;
+  sessionID?: string;
 }
 
 /**
@@ -27,12 +27,17 @@ interface BaseEvent {
 export interface TokenUsage {
   input?: number;
   output?: number;
+  reasoning?: number;
+  cache?: {
+    read?: number;
+    write?: number;
+  };
 }
 
 /**
- * Tool part state for message.part.updated events.
+ * Tool state for tool_use events.
  */
-export interface ToolPartState {
+export interface ToolState {
   status?: 'pending' | 'running' | 'completed' | 'error';
   title?: string;
   input?: Record<string, unknown>;
@@ -41,11 +46,24 @@ export interface ToolPartState {
 }
 
 /**
- * Text part with timing info.
+ * Part structure for step_start events.
+ */
+export interface StepStartPart {
+  id?: string;
+  sessionID?: string;
+  messageID?: string;
+  type: 'step-start';
+  snapshot?: string;
+}
+
+/**
+ * Part structure for text events.
  */
 export interface TextPart {
-  type: 'text';
+  id?: string;
   sessionID?: string;
+  messageID?: string;
+  type: 'text';
   text?: string;
   time?: {
     start?: number;
@@ -54,51 +72,62 @@ export interface TextPart {
 }
 
 /**
- * Tool part for tool usage.
+ * Part structure for tool_use events.
  */
-export interface ToolPart {
+export interface ToolUsePart {
+  id?: string;
+  sessionID?: string;
+  messageID?: string;
   type: 'tool';
-  sessionID?: string;
+  callID?: string;
   tool?: string;
-  state?: ToolPartState;
+  state?: ToolState;
 }
 
 /**
- * Step start part.
- */
-export interface StepStartPart {
-  type: 'step-start';
-  sessionID?: string;
-}
-
-/**
- * Step finish part with tokens.
+ * Part structure for step_finish events.
  */
 export interface StepFinishPart {
-  type: 'step-finish';
+  id?: string;
   sessionID?: string;
+  messageID?: string;
+  type: 'step-finish';
+  reason?: string;
+  snapshot?: string;
+  cost?: number;
   tokens?: TokenUsage;
 }
 
 /**
- * Union type for message parts.
+ * step_start event - indicates a new step is starting.
  */
-export type MessagePart = TextPart | ToolPart | StepStartPart | StepFinishPart;
+export interface StepStartEvent extends BaseEvent {
+  type: 'step_start';
+  part?: StepStartPart;
+}
 
 /**
- * Contains updated message content from the agent.
- * The part.type determines what kind of update this is:
- * - 'text': Text output from the agent
- * - 'tool': Tool usage information
- * - 'step-start': Step started (ignored)
- * - 'step-finish': Step finished with token info
+ * text event - contains text output from the agent.
  */
-export interface MessagePartUpdatedEvent extends BaseEvent {
-  type: 'message.part.updated';
-  properties?: {
-    sessionID?: string;
-    part?: MessagePart;
-  };
+export interface TextEvent extends BaseEvent {
+  type: 'text';
+  part?: TextPart;
+}
+
+/**
+ * tool_use event - contains tool execution information.
+ */
+export interface ToolUseEvent extends BaseEvent {
+  type: 'tool_use';
+  part?: ToolUsePart;
+}
+
+/**
+ * step_finish event - indicates a step has completed.
+ */
+export interface StepFinishEvent extends BaseEvent {
+  type: 'step_finish';
+  part?: StepFinishPart;
 }
 
 /**
@@ -106,14 +135,11 @@ export interface MessagePartUpdatedEvent extends BaseEvent {
  */
 export interface SessionErrorEvent extends BaseEvent {
   type: 'session.error';
-  properties?: {
-    sessionID?: string;
-    error?: {
-      name?: string;
+  error?: {
+    name?: string;
+    message?: string;
+    data?: {
       message?: string;
-      data?: {
-        message?: string;
-      };
     };
   };
 }
@@ -123,23 +149,6 @@ export interface SessionErrorEvent extends BaseEvent {
  */
 export interface SessionIdleEvent extends BaseEvent {
   type: 'session.idle';
-  properties?: {
-    sessionID?: string;
-  };
-}
-
-/**
- * Permission asked event.
- */
-export interface PermissionAskedEvent extends BaseEvent {
-  type: 'permission.asked';
-  properties?: {
-    sessionID?: string;
-    id?: string;
-    permission?: string;
-    patterns?: string[];
-    always?: string[];
-  };
 }
 
 /**
@@ -147,16 +156,30 @@ export interface PermissionAskedEvent extends BaseEvent {
  * Use type guards to narrow to specific event types.
  */
 export type StreamEvent =
-  | MessagePartUpdatedEvent
+  | StepStartEvent
+  | TextEvent
+  | ToolUseEvent
+  | StepFinishEvent
   | SessionErrorEvent
-  | SessionIdleEvent
-  | PermissionAskedEvent;
+  | SessionIdleEvent;
 
 /**
  * Type guard functions for stream events.
  */
-export function isMessagePartUpdatedEvent(event: StreamEvent): event is MessagePartUpdatedEvent {
-  return event.type === 'message.part.updated';
+export function isStepStartEvent(event: StreamEvent): event is StepStartEvent {
+  return event.type === 'step_start';
+}
+
+export function isTextEvent(event: StreamEvent): event is TextEvent {
+  return event.type === 'text';
+}
+
+export function isToolUseEvent(event: StreamEvent): event is ToolUseEvent {
+  return event.type === 'tool_use';
+}
+
+export function isStepFinishEvent(event: StreamEvent): event is StepFinishEvent {
+  return event.type === 'step_finish';
 }
 
 export function isSessionErrorEvent(event: StreamEvent): event is SessionErrorEvent {
@@ -165,10 +188,6 @@ export function isSessionErrorEvent(event: StreamEvent): event is SessionErrorEv
 
 export function isSessionIdleEvent(event: StreamEvent): event is SessionIdleEvent {
   return event.type === 'session.idle';
-}
-
-export function isPermissionAskedEvent(event: StreamEvent): event is PermissionAskedEvent {
-  return event.type === 'permission.asked';
 }
 
 // =============================================================================
