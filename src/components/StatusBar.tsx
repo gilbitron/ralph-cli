@@ -51,7 +51,7 @@ export function formatTokenCount(tokens: number): string {
  */
 export function StatusBar({
   currentIteration,
-  maxIterations,
+  maxIterations: _maxIterations,
   elapsedSeconds,
   totalTokens,
   width,
