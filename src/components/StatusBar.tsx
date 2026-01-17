@@ -60,7 +60,7 @@ export function StatusBar({
   const borderWidth = width ?? 60;
   const borderLine = '─'.repeat(borderWidth);
 
-  const iterationDisplay = `${currentIteration}/${maxIterations}`;
+  const iterationDisplay = `${currentIteration}`;
   const timeDisplay = formatElapsedTime(elapsedSeconds);
   const tokenDisplay = formatTokenCount(totalTokens);
 
