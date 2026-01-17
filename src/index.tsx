@@ -6,7 +6,7 @@
  * It handles initialization, validation, and renders the TUI.
  */
 
-import { render } from 'ink';
+import { withFullScreen } from 'fullscreen-ink';
 import { createInterface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -180,38 +180,32 @@ async function main(): Promise<void> {
     let appExitCode = EXIT_CODE_SUCCESS;
 
     // Create a promise that resolves when the App is ready
+    let resolveCallbacks: (callbacks: RunnerCallbacks) => void;
     const callbacksReady = new Promise<RunnerCallbacks>((resolve) => {
-      const onReady = (callbacks: RunnerCallbacks) => {
-        resolve(callbacks);
-      };
-
-      const onExit = (code: number) => {
-        appExitCode = code;
-      };
-
-      // Render the ink App component
-      const { unmount, waitUntilExit } = render(
-        <App
-          maxIterations={config.iterations}
-          dryRun={config.dryRun}
-          onReady={onReady}
-          onExit={onExit}
-        />
-      );
-
-      // Handle the App exit
-      waitUntilExit()
-        .then(() => {
-          exitCode = appExitCode;
-        })
-        .catch((error: Error) => {
-          console.error(chalk.red('TUI error:'), error.message);
-          exitCode = EXIT_CODE_ERROR;
-        });
-
-      // Store unmount for cleanup (not currently used, but available)
-      void unmount;
+      resolveCallbacks = resolve;
     });
+
+    const onReady = (callbacks: RunnerCallbacks) => {
+      resolveCallbacks(callbacks);
+    };
+
+    const onExit = (code: number) => {
+      appExitCode = code;
+    };
+
+    // Render the ink App component with fullscreen-ink for alternate screen buffer management
+    // This automatically switches to alternate screen on start and restores terminal on exit
+    const fullScreenApp = withFullScreen(
+      <App
+        maxIterations={config.iterations}
+        dryRun={config.dryRun}
+        onReady={onReady}
+        onExit={onExit}
+      />
+    );
+
+    // Start the fullscreen app (enters alternate screen buffer)
+    await fullScreenApp.start();
 
     // Wait for the App to be ready and get callbacks
     const callbacks = await callbacksReady;
@@ -231,8 +225,13 @@ async function main(): Promise<void> {
       exitCode = EXIT_CODE_ERROR;
     }
 
-    // Wait a moment for the TUI to finish rendering
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for the fullscreen app to exit (this handles alternate screen buffer restoration)
+    await fullScreenApp.waitUntilExit();
+
+    // Use the app exit code if it was set
+    if (appExitCode !== EXIT_CODE_SUCCESS) {
+      exitCode = appExitCode;
+    }
 
   } catch (error) {
     // Handle unexpected errors
