@@ -110,11 +110,15 @@ async function displayPlanConfirmation(cwd: string): Promise<boolean> {
  * @param model - Model being used
  * @param cwd - Current working directory
  * @param promptFile - Optional path to custom prompt file
+ * @param dryRun - Whether dry run mode is enabled
  */
-function displayStartupBanner(iterations: number, model: string, cwd: string, promptFile?: string): void {
+function displayStartupBanner(iterations: number, model: string, cwd: string, promptFile?: string, dryRun?: boolean): void {
   console.log('');
   console.log(chalk.cyan.bold('Starting Ralph'));
   console.log(chalk.gray('─'.repeat(40)));
+  if (dryRun) {
+    console.log(chalk.gray('Mode:          '), chalk.yellow.bold('DRY RUN (Plan agent)'));
+  }
   console.log(chalk.gray('Max iterations:'), chalk.white(iterations.toString()));
   console.log(chalk.gray('Model:         '), chalk.white(model));
   console.log(chalk.gray('Workspace:     '), chalk.white(cwd));
@@ -145,19 +149,21 @@ async function main(): Promise<void> {
       process.exit(EXIT_CODE_ERROR);
     }
 
-    // Check for uncommitted git changes
-    const gitStatus = await checkGitStatus(config.cwd);
-    if (gitStatus.isGitRepo && gitStatus.hasUncommittedChanges) {
-      console.log('');
-      console.log(chalk.yellow(formatGitWarning(gitStatus)));
-      console.log('');
+    // Check for uncommitted git changes (skip in dry run mode since no changes will be made)
+    if (!config.dryRun) {
+      const gitStatus = await checkGitStatus(config.cwd);
+      if (gitStatus.isGitRepo && gitStatus.hasUncommittedChanges) {
+        console.log('');
+        console.log(chalk.yellow(formatGitWarning(gitStatus)));
+        console.log('');
 
-      const shouldContinue = await promptYesNo('Do you want to continue anyway?');
-      if (!shouldContinue) {
-        console.log(chalk.gray('Aborted. Please commit or stash your changes first.'));
-        process.exit(EXIT_CODE_SUCCESS);
+        const shouldContinue = await promptYesNo('Do you want to continue anyway?');
+        if (!shouldContinue) {
+          console.log(chalk.gray('Aborted. Please commit or stash your changes first.'));
+          process.exit(EXIT_CODE_SUCCESS);
+        }
+        console.log('');
       }
-      console.log('');
     }
 
     // Display plan and ask for confirmation
@@ -168,7 +174,7 @@ async function main(): Promise<void> {
     }
 
     // Display startup banner
-    displayStartupBanner(config.iterations, config.model, config.cwd, config.promptFile);
+    displayStartupBanner(config.iterations, config.model, config.cwd, config.promptFile, config.dryRun);
 
     // Track the exit code from the App component
     let appExitCode = EXIT_CODE_SUCCESS;
@@ -187,6 +193,7 @@ async function main(): Promise<void> {
       const { unmount, waitUntilExit } = render(
         <App
           maxIterations={config.iterations}
+          dryRun={config.dryRun}
           onReady={onReady}
           onExit={onExit}
         />

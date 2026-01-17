@@ -98,6 +98,7 @@ function createProgram(): Command {
       parsePromptPath
     )
     .option('--debug', 'Enable debug logging to .ralph/logs/', DEFAULT_CONFIG.debug)
+    .option('--dry-run', 'Run a single iteration in analysis-only mode using the Plan agent', false)
     .helpOption('-h, --help', 'Display help information');
 
   return program;
@@ -111,6 +112,7 @@ interface ParsedOptions {
   model: string;
   prompt?: string;
   debug: boolean;
+  dryRun: boolean;
 }
 
 /**
@@ -131,9 +133,10 @@ export function parseCliArgs(argv: string[] = process.argv): RunnerConfig {
 
   // Build and return the configuration
   const config: RunnerConfig = {
-    iterations: options.iterations,
+    iterations: options.dryRun ? 1 : options.iterations,
     model: options.model,
     debug: options.debug,
+    dryRun: options.dryRun,
     cwd: process.cwd(),
     promptFile: options.prompt,
   };

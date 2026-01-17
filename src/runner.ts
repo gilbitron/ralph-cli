@@ -307,6 +307,8 @@ async function runIteration(
       'run',
       '--model', config.model,
       '--format=json',
+      // Use the Plan agent for dry run mode (analysis only, no file changes)
+      ...(config.dryRun ? ['--agent', 'plan'] : []),
       prompt,
     ];
 
@@ -669,6 +671,14 @@ export async function run(options: RunnerOptions): Promise<RunnerResult> {
 
   // Update status to running
   callbacks.onStatusChange('running');
+
+  // Show dry run mode message if enabled
+  if (config.dryRun) {
+    callbacks.onOutput({
+      content: 'DRY RUN MODE: Using Plan agent (analysis only, no file changes)',
+      type: 'warning',
+    });
+  }
 
   let iterationsRun = 0;
 

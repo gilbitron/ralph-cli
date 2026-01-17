@@ -251,6 +251,8 @@ export interface RunnerConfig {
   model: string;
   /** Enable debug logging to .ralph/logs/ */
   debug: boolean;
+  /** Enable dry run mode (single iteration using Plan agent, no changes) */
+  dryRun: boolean;
   /** Current working directory */
   cwd: string;
   /** Path to custom prompt file (optional, uses built-in prompt if not specified) */
@@ -264,6 +266,7 @@ export const DEFAULT_CONFIG: Omit<RunnerConfig, 'cwd' | 'promptFile'> = {
   iterations: 100,
   model: 'opencode/claude-opus-4-5',
   debug: false,
+  dryRun: false,
 };
 
 // =============================================================================

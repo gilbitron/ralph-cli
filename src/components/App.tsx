@@ -20,6 +20,8 @@ import { LiveOutput } from './LiveOutput.js';
 export interface AppProps {
   /** Maximum number of iterations */
   maxIterations: number;
+  /** Whether dry run mode is enabled */
+  dryRun?: boolean;
   /** Callback to receive the runner callbacks for state updates */
   onReady?: (callbacks: RunnerCallbacks) => void;
   /** Callback when the app should exit */
@@ -66,7 +68,7 @@ const OUTPUT_THROTTLE_MS = 100;
 /**
  * Main App component that composes all TUI elements.
  */
-export function App({ maxIterations, onReady, onExit }: AppProps): JSX.Element {
+export function App({ maxIterations, dryRun, onReady, onExit }: AppProps): JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
 
@@ -232,7 +234,7 @@ export function App({ maxIterations, onReady, onExit }: AppProps): JSX.Element {
   return (
     <Box flexDirection="column" width={width}>
       {/* Header with branding */}
-      <Header width={width} />
+      <Header width={width} dryRun={dryRun} />
 
       {/* Status bar with iteration, time, and tokens */}
       <StatusBar
