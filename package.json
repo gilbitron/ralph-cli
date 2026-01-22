@@ -1,5 +1,5 @@
 {
-  "name": "ralph-cli",
+  "name": "@dev7studios/ralph-cli",
   "version": "0.1.0",
   "description": "Autonomous AI agent runner that orchestrates iterative coding workflows using opencode",
   "keywords": [
