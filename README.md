@@ -24,20 +24,7 @@ Ralph runs an AI agent in a loop, allowing it to work through a plan of tasks au
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/gilbitron/ralph-cli.git
-cd ralph-cli
-
-# Install dependencies
-npm install
-
-# Run directly (development)
-./bin/ralph
-
-# Or build and install globally
-npm run build
-npm link
-ralph
+npx @dev7studios/ralph-cli
 ```
 
 ## Usage
@@ -131,14 +118,17 @@ When `--debug` is enabled, Ralph creates detailed logs in `.ralph/logs/`:
 ## Development
 
 ```bash
-# Type check
-npm run typecheck
+git clone https://github.com/gilbitron/ralph-cli.git
+cd ralph-cli
 
 # Run directly with tsx
+npm install
 npm run dev
 
-# Build to JavaScript
+# Or build and install globally
 npm run build
+npm link
+ralph
 ```
 
 ## License
