@@ -1,6 +1,6 @@
 {
   "name": "ralph-cli",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Autonomous AI agent runner that orchestrates iterative coding workflows using opencode",
   "keywords": [
     "cli",
