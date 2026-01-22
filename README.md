@@ -4,6 +4,8 @@ Autonomous AI agent runner that orchestrates iterative coding workflows using [o
 
 Ralph runs an AI agent in a loop, allowing it to work through a plan of tasks autonomously. It provides a real-time TUI dashboard showing progress, token usage, and live output.
 
+<img width="1636" height="1112" alt="Image" src="https://github.com/user-attachments/assets/795fb834-1418-470a-a1e0-df26890e9626" />
+
 ## Features
 
 - **Iterative Execution**: Runs the AI agent in a loop until all tasks are complete or max iterations reached
